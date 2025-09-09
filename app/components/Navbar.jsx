@@ -1,15 +1,16 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useSession, signIn, signOut } from "next-auth/react";
 
 export default function Navbar() {
   const pathname = usePathname();
+  const { data: session, status } = useSession();
 
   const navItems = [
     { href: "/", label: "Home" },
     { href: "/about", label: "About" },
     { href: "/careers", label: "Careers" },
-    { href: "/resources", label: "Resources" },
     { href: "/contact", label: "Contact" },
   ];
 
@@ -39,6 +40,21 @@ export default function Navbar() {
             })}
           </nav>
           <div className="flex items-center gap-2">
+            {status === "authenticated" ? (
+              <button
+                onClick={() => signOut()}
+                className="inline-flex items-center justify-center rounded-lg px-3 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100 transition"
+              >
+                Sign out
+              </button>
+            ) : (
+              <button
+                onClick={() => signIn("github")}
+                className="inline-flex items-center justify-center rounded-lg px-3 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100 transition"
+              >
+                Sign in with Github
+              </button>
+            )}
             <Link
               href="/test"
               className="inline-flex items-center justify-center rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white shadow-sm ring-1 ring-black/5 transition hover:bg-gray-800 dark:bg-white dark:text-black dark:hover:bg-gray-100"
