@@ -49,10 +49,9 @@ export default function Navbar() {
               </button>
             ) : (
               <button
-                onClick={() => signIn("github")}
                 className="inline-flex items-center justify-center rounded-lg px-3 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100 transition"
               >
-                Sign in with Github
+               <Link href={"/signIn"}>Sign in</Link>  
               </button>
             )}
             <Link
