@@ -1,60 +1,117 @@
-"use client";
-import { useMemo } from "react";
-import { useSearchParams } from "next/navigation";
+import { getServerSession } from "next-auth";
+import dbConnect from "@/lib/dbConnect";
+import { authOptions } from "@/app/api/auth/[...nextauth]/route";
+import Answer from "@/models/Answer";
 
-function parseData(search) {
+async function fetchLatestAnswerForUser(userId) {
+  await dbConnect();
+  const doc = await Answer.findOne({ userId }).sort({ createdAt: -1 }).lean();
+  return doc;
+}
+
+function toReadableSummary(answer) {
+  if (!answer) return "";
+  const parts = [];
+  if (answer.pastProject) parts.push(`Past project: ${answer.pastProject}`);
+  if (answer.workPreference) parts.push(`Work preference: ${answer.workPreference}`);
+  if (answer.cityConstraints?.length) parts.push(`City constraints: ${answer.cityConstraints.join(", ")}`);
+  if (answer.confidentSkills?.length) parts.push(`Confident skills: ${answer.confidentSkills.join(", ")}`);
+  if (answer.skillRatings?.length) {
+    parts.push(
+      `Skill ratings: ${answer.skillRatings
+        .map((s) => `${s.name}=${s.rating}${s.proof ? ` (${s.proof})` : ""}`)
+        .join(", ")}`
+    );
+  }
+  if (answer.values?.length) parts.push(`Values: ${answer.values.join(", ")}`);
+  if (answer.futureVision) parts.push(`Future vision (3y): ${answer.futureVision}`);
+  if (answer.proudProject) parts.push(`Proud project: ${answer.proudProject}`);
+  if (answer.enjoyedSubjects) parts.push(`Enjoyed subjects: ${answer.enjoyedSubjects}`);
+  return parts.join("\n");
+}
+
+async function getCareerGuidanceLLM(content) {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) {
+    return { text: "LLM not configured. Set GROQ_API_KEY to enable AI guidance." };
+  }
+
+  const system =
+    "You are a seasoned career guide for early-career software engineers. Provide concise, practical guidance: 1) 2–3 likely career directions with rationale mapping to user's skills, values, and preferences; 2) a 4-week learning and project plan; 3) 3 concrete portfolio project ideas; 4) key topics to revise for interviews; 5) suggested job search query strings. Keep it actionable and friendly.";
+
+  const user = `User profile and answers:\n\n${content}`;
+
   try {
-    return JSON.parse(search.get("data") || "{}");
-  } catch {
-    return {};
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: "openai/gpt-oss-20b",
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+        temperature: 0.4,
+      }),
+      cache: "no-store",
+    });
+    const json = await res.json();
+    const text = json?.choices?.[0]?.message?.content || "";
+    return { text };
+  } catch (e) {
+    return { text: "Unable to fetch AI guidance right now." };
   }
 }
 
-export default function ResultsPage() {
-  const search = useSearchParams();
-  const answers = useMemo(() => parseData(search), [search]);
+export default async function ResultsPage() {
+  const session = await getServerSession(authOptions);
+  const userId = session?.user?.id;
 
-  const highlights = [
-    ...(answers.interests || []),
-    answers.education ? `Edu: ${answers.education}` : null,
-    ...(answers.skills || []),
-  ].filter(Boolean);
+  if (!userId) {
+    return (
+      <div className="mx-auto max-w-3xl px-6 py-16">
+        <h1 className="text-2xl font-semibold">Your Results</h1>
+        <p className="mt-2 text-gray-600 dark:text-gray-300">Please sign in to view your personalized results.</p>
+      </div>
+    );
+  }
 
-  // Simple heuristic recommendations
-  const recs = [];
-  const hasDesign = (answers.skills || []).includes("Design") || (answers.interests || []).includes("Creative");
-  const hasCode = (answers.skills || []).includes("Coding") || (answers.interests || []).includes("Analytical");
-  const hasData = (answers.skills || []).includes("Data") || (answers.interests || []).includes("Research");
-  if (hasDesign && hasCode) recs.push("Frontend Developer", "Product Designer");
-  else if (hasDesign) recs.push("UI/UX Designer");
-  if (hasData) recs.push("Data Analyst");
-  if (recs.length === 0) recs.push("Project Coordinator", "Business Analyst");
+  const answer = await fetchLatestAnswerForUser(userId);
+  if (!answer) {
+    return (
+      <div className="mx-auto max-w-3xl px-6 py-16">
+        <h1 className="text-2xl font-semibold">Your Results</h1>
+        <p className="mt-2 text-gray-600 dark:text-gray-300">No answers found. Fill the questionnaire to get guidance.</p>
+      </div>
+    );
+  }
+
+  const readable = toReadableSummary(answer);
+  const ai = await getCareerGuidanceLLM(readable);
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-16">
       <h1 className="text-3xl font-semibold">Your Results</h1>
-      <p className="mt-2 text-gray-600 dark:text-gray-300">Based on your answers, here are some paths to explore.</p>
+      <p className="mt-2 text-gray-600 dark:text-gray-300">Personalized guidance based on your latest answers.</p>
 
       <div className="mt-8 grid gap-6 md:grid-cols-3">
         <div className="card md:col-span-2">
-          <h2 className="text-lg font-semibold">Recommended careers</h2>
-          <ul className="mt-3 space-y-2">
-            {recs.map((r) => (
-              <li key={r} className="rounded-lg bg-white/60 px-3 py-2 text-sm shadow-sm dark:bg-neutral-900/60">{r}</li>
-            ))}
-          </ul>
+          <h2 className="text-lg font-semibold">Career guidance (AI)</h2>
+          <div className="prose prose-sm mt-3 whitespace-pre-wrap dark:prose-invert">
+            {ai.text}
+          </div>
         </div>
         <div className="card">
-          <h2 className="text-lg font-semibold">Your profile</h2>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {highlights.map((h) => (
-              <span key={h} className="rounded-full border border-transparent/10 bg-white/70 px-3 py-1 text-xs shadow-sm dark:bg-neutral-900/60">{h}</span>
-            ))}
+          <h2 className="text-lg font-semibold">Your answers (summary)</h2>
+          <div className="mt-3 text-sm whitespace-pre-wrap">
+            {readable}
           </div>
         </div>
       </div>
     </div>
   );
 }
-
 
